@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PMS 워터폴 간트차트</title>
+    <link rel="stylesheet" href="/vendor/frappe-gantt/frappe-gantt.css">
+    <style>
+        :root {
+            color-scheme: light;
+            font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+            color: #172033;
+            background: #f3f6fb;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; padding: 32px; }
+        main { max-width: 1440px; margin: 0 auto; }
+        h1 { margin: 0 0 8px; font-size: 26px; }
+        .description { margin: 0 0 24px; color: #5e687a; }
+        .status { min-height: 24px; margin-bottom: 12px; color: #536078; }
+        .status.error { color: #b42318; }
+        .pms-container {
+            display: grid;
+            grid-template-columns: minmax(240px, 30%) minmax(0, 70%);
+            width: 100%;
+            overflow: hidden;
+            border: 1px solid #d4dae4;
+            border-radius: 10px;
+            background: #fff;
+            box-shadow: 0 6px 24px rgba(27, 39, 64, 0.08);
+        }
+        .pms-container[hidden] { display: none; }
+        .wbs-panel { border-right: 1px solid #d4dae4; background: #fbfcfe; }
+        .wbs-header {
+            height: 75px;
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            border-bottom: 1px solid #d4dae4;
+            background: #eef2f8;
+            font-weight: 700;
+        }
+        .wbs-item {
+            height: 48px;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            gap: 8px;
+            align-items: center;
+            overflow: hidden;
+            padding: 0 12px 0 calc(12px + var(--wbs-depth, 0) * 20px);
+            border-bottom: 1px solid #eef1f5;
+            font-size: 14px;
+            white-space: nowrap;
+        }
+        .wbs-code { color: #7a8496; font-variant-numeric: tabular-nums; }
+        .wbs-title { overflow: hidden; text-overflow: ellipsis; }
+        .wbs-assignee { color: #697386; font-size: 12px; }
+        .gantt-panel { min-width: 0; overflow-x: auto; background: #fff; }
+        #gantt-target { min-height: 300px; }
+        .gantt .bar { fill: #9ba8ff; stroke: #7788f8; }
+        .gantt .bar-progress { fill: #4f64e8; }
+        @media (max-width: 760px) {
+            body { padding: 16px; }
+            .pms-container { grid-template-columns: 180px minmax(560px, 1fr); overflow-x: auto; }
+        }
+    </style>
+</head>
+<body>
+<main>
+    <h1>IT 개발 워터폴 PMS</h1>
+    <p class="description">MySQL 작업 정보를 기준으로 표시한 프로젝트 일정입니다.</p>
+    <div id="status" class="status" role="status">작업을 불러오는 중입니다.</div>
+    <div class="pms-container" hidden id="pms-container">
+        <div class="wbs-panel" id="wbs-list">
+            <div class="wbs-header">작업명 (WBS)</div>
+        </div>
+        <div class="gantt-panel">
+            <div id="gantt-target"></div>
+        </div>
+    </div>
+</main>
+<script src="/vendor/frappe-gantt/frappe-gantt.umd.js"></script>
+<script>
+    const statusElement = document.getElementById('status');
+    const containerElement = document.getElementById('pms-container');
+    const wbsContainer = document.getElementById('wbs-list');
+
+    async function loadTasks() {
+        try {
+            const projectId = new URLSearchParams(window.location.search).get('project_id');
+            const endpoint = projectId
+                ? `/api/projects/${encodeURIComponent(projectId)}/tasks`
+                : '/api/tasks';
+            const response = await fetch(endpoint, {
+                headers: { Accept: 'application/json' }
+            });
+            const payload = await response.json();
+
+            if (!response.ok) {
+                throw new Error(payload.error || '작업 목록 요청에 실패했습니다.');
+            }
+            if (payload.length === 0) {
+                statusElement.textContent = '표시할 작업이 없습니다.';
+                return;
+            }
+
+            payload.forEach((task) => {
+                const item = document.createElement('div');
+                item.className = 'wbs-item';
+                item.style.setProperty('--wbs-depth', String(task.depth || 0));
+                item.title = task.name;
+
+                const code = document.createElement('span');
+                code.className = 'wbs-code';
+                code.textContent = task.wbs;
+                const title = document.createElement('span');
+                title.className = 'wbs-title';
+                title.textContent = task.name;
+                const assignee = document.createElement('span');
+                assignee.className = 'wbs-assignee';
+                assignee.textContent = task.assignee;
+                item.append(code, title, assignee);
+                wbsContainer.appendChild(item);
+            });
+
+            containerElement.hidden = false;
+            statusElement.textContent = `${payload.length}개 작업을 불러왔습니다.`;
+            new Gantt('#gantt-target', payload, {
+                bar_height: 30,
+                padding: 18,
+                view_mode: 'Day',
+                language: 'en',
+                readonly: true,
+                readonly_dates: true,
+                readonly_progress: true
+            });
+        } catch (error) {
+            console.error('간트차트 로드 실패:', error);
+            statusElement.classList.add('error');
+            statusElement.textContent = error.message;
+        }
+    }
+
+    loadTasks();
+</script>
+</body>
+</html>

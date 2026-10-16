@@ -1,0 +1,20 @@
+{
+  "name": "pms-project",
+  "version": "1.0.0",
+  "description": "MySQL 기반 PMS 워터폴 간트차트",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "dotenv": "^18.0.8",
+    "express": "^5.3.0",
+    "frappe-gantt": "^1.2.2",
+    "mysql2": "^3.24.6"
+  }
+}

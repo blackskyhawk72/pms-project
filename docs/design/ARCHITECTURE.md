@@ -159,13 +159,12 @@ stateDiagram-v2
 - 대시보드 집계와 진척 스냅샷
 - 바이러스 검사와 대용량 미리보기 생성
 
-초기 구현은 MySQL의 `pms_jobs` 테이블을 큐로 사용한다. 현재 개발 DB인 MariaDB
-10.4에서는 `SKIP LOCKED`를 사용할 수 없으므로 Worker가 고유 lease token을 만든 뒤
-`UPDATE ... WHERE status = 'QUEUED' ORDER BY created_at LIMIT 1`로 한 건을 원자적으로
-선점하고, 해당 token으로 작업을 조회한다. 재시도 횟수, 마지막 오류, heartbeat와
-lease 만료 시각을 함께 기록해 중단된 작업을 회수한다. MariaDB 10.6 이상으로
-올린 경우에만 `FOR UPDATE SKIP LOCKED` 방식을 선택할 수 있다. 처리량이 실제 병목이
-된 뒤에만 Redis 등 전용 큐를 검토한다.
+초기 구현은 MySQL의 `pms_jobs` 테이블을 큐로 사용한다. Worker가 고유 lease token을
+만든 뒤 `UPDATE ... WHERE status = 'QUEUED' ORDER BY created_at LIMIT 1`로 한 건을
+원자적으로 선점하고, 해당 token으로 작업을 조회한다. 재시도 횟수, 마지막 오류,
+heartbeat와 lease 만료 시각을 함께 기록해 중단된 작업을 회수한다. 목표 MySQL
+버전이 확정된 뒤 지원 범위를 확인해 `FOR UPDATE SKIP LOCKED` 최적화를 선택할 수
+있다. 처리량이 실제 병목이 된 뒤에만 Redis 등 전용 큐를 검토한다.
 
 ## 9. Excel 반영 흐름
 
@@ -222,7 +221,7 @@ Release 1의 최소 운영 단위:
 
 - Web/API Node.js 프로세스 1개 이상
 - Worker Node.js 프로세스 1개 이상
-- MySQL/MariaDB
+- MySQL
 - 로컬 디스크 또는 NAS 파일 저장소
 - TLS 종료용 reverse proxy
 
@@ -233,7 +232,7 @@ Release 1의 최소 운영 단위:
 | 결정 | 선택 | 이유 |
 |---|---|---|
 | 애플리케이션 구조 | 모듈형 모놀리스 | 현재 팀·규모에서 트랜잭션과 배포 단순성 우선 |
-| DB | MySQL/MariaDB 유지 | 기존 데이터와 운영 환경 보존 |
+| DB | MySQL 유지 | 기존 데이터와 운영 환경 보존 |
 | 대량 작업 | DB 큐 + Worker | 초기 운영 구성 최소화, 재시도 이력 확보 |
 | 파일 | 저장소 어댑터 | 로컬/NAS에서 S3 호환 저장소로 이동 가능 |
 | 삭제 | soft delete/보관 기본 | 감사와 추적성 보존 |

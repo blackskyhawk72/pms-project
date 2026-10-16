@@ -43,3 +43,4 @@ npm test
 
 제품 요구사항은 `REQUIREMENTS.md`, 범용 PMS 비교 결과는 `BENCHMARK.md`,
 단계별 구현 계획은 `DEVELOPMENT_PLAN.md`에서 확인할 수 있습니다.
+시스템 구조, 데이터 모델, API 규약은 `docs/design/`에 정리되어 있습니다.

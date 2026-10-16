@@ -41,5 +41,5 @@ npm test
 작업 API는 부모 작업이 자식보다 먼저 오도록 평탄화한 배열을 반환합니다.
 각 작업에는 원본 `parentId`와 함께 화면용 `depth`, `wbs` 값이 포함됩니다.
 
-제품 방향과 범용 PMS 비교 결과는 `BENCHMARK.md`, 단계별 구현 계획은
-`DEVELOPMENT_PLAN.md`에서 확인할 수 있습니다.
+제품 요구사항은 `REQUIREMENTS.md`, 범용 PMS 비교 결과는 `BENCHMARK.md`,
+단계별 구현 계획은 `DEVELOPMENT_PLAN.md`에서 확인할 수 있습니다.

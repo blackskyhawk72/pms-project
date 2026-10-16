@@ -19,6 +19,20 @@ const dbConfig = {
     dateStrings: true
 };
 
+const writeDbConfig = {
+    ...dbConfig,
+    user: process.env.DB_WRITE_USER || dbConfig.user,
+    password: process.env.DB_WRITE_PASSWORD || dbConfig.password
+};
+
+const PROJECT_STATUSES = new Set([
+    'PLANNED',
+    'ACTIVE',
+    'ON_HOLD',
+    'COMPLETED',
+    'CANCELLED'
+]);
+
 function parseInteger(value, fallback) {
     const parsed = Number.parseInt(value, 10);
     return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
@@ -113,6 +127,105 @@ function parseProjectId(value) {
     return Number.isSafeInteger(projectId) ? projectId : null;
 }
 
+function normalizeNullableDate(value) {
+    if (value === undefined || value === null || value === '') return null;
+    return normalizeDate(value) || null;
+}
+
+function normalizeInputDate(value) {
+    if (value === undefined || value === null || value === '') return null;
+    const text = String(value);
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+    if (!match) return null;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    if (year < 1000) return null;
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    return parsed.getUTCFullYear() === year &&
+        parsed.getUTCMonth() === month - 1 &&
+        parsed.getUTCDate() === day ? text : null;
+}
+
+function normalizeProject(project) {
+    return {
+        id: Number(project.id),
+        name: String(project.name),
+        description: project.description ? String(project.description) : '',
+        startDate: normalizeNullableDate(project.start_date),
+        endDate: normalizeNullableDate(project.end_date),
+        status: String(project.status),
+        createdAt: project.created_at ? String(project.created_at) : null,
+        updatedAt: project.updated_at ? String(project.updated_at) : null
+    };
+}
+
+function normalizePhase(phase) {
+    return {
+        id: Number(phase.id),
+        projectId: Number(phase.project_id),
+        code: String(phase.code),
+        name: String(phase.name),
+        sequence: Number(phase.sequence_no),
+        startDate: normalizeNullableDate(phase.start_date),
+        endDate: normalizeNullableDate(phase.end_date),
+        status: String(phase.status)
+    };
+}
+
+function validateDateRange(startDate, endDate) {
+    if (startDate && endDate && endDate < startDate) {
+        return '종료일은 시작일보다 빠를 수 없습니다.';
+    }
+    return null;
+}
+
+function validateProjectInput(body) {
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    const startDate = normalizeInputDate(body.startDate);
+    const endDate = normalizeInputDate(body.endDate);
+    const status = body.status === undefined ? 'PLANNED' : String(body.status);
+
+    if (!name || name.length > 255) {
+        return { error: '프로젝트명은 1자 이상 255자 이하여야 합니다.' };
+    }
+    if (body.startDate && !startDate) return { error: '시작일 형식이 올바르지 않습니다.' };
+    if (body.endDate && !endDate) return { error: '종료일 형식이 올바르지 않습니다.' };
+    const dateError = validateDateRange(startDate, endDate);
+    if (dateError) return { error: dateError };
+    if (!PROJECT_STATUSES.has(status)) return { error: '프로젝트 상태가 올바르지 않습니다.' };
+
+    return {
+        value: {
+            name,
+            description: typeof body.description === 'string' ? body.description.trim() : null,
+            startDate,
+            endDate,
+            status
+        }
+    };
+}
+
+function validatePhaseInput(body) {
+    const code = typeof body.code === 'string' ? body.code.trim() : '';
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    const sequence = Number(body.sequence);
+    const startDate = normalizeInputDate(body.startDate);
+    const endDate = normalizeInputDate(body.endDate);
+    const status = body.status === undefined ? 'PLANNED' : String(body.status);
+
+    if (!code || code.length > 50) return { error: '단계 코드는 1자 이상 50자 이하여야 합니다.' };
+    if (!name || name.length > 255) return { error: '단계명은 1자 이상 255자 이하여야 합니다.' };
+    if (!Number.isSafeInteger(sequence) || sequence < 1) return { error: '단계 순서는 1 이상의 정수여야 합니다.' };
+    if (body.startDate && !startDate) return { error: '시작일 형식이 올바르지 않습니다.' };
+    if (body.endDate && !endDate) return { error: '종료일 형식이 올바르지 않습니다.' };
+    const dateError = validateDateRange(startDate, endDate);
+    if (dateError) return { error: dateError };
+    if (!PROJECT_STATUSES.has(status)) return { error: '단계 상태가 올바르지 않습니다.' };
+
+    return { value: { code, name, sequence, startDate, endDate, status } };
+}
+
 const TASK_COLUMNS = [
     'id',
     'project_id',
@@ -135,7 +248,7 @@ async function loadTasks(pool, projectId) {
     return buildTaskHierarchy(rows);
 }
 
-function createApp(pool) {
+function createApp(pool, writePool = pool) {
     const app = express();
 
     app.disable('x-powered-by');
@@ -177,6 +290,88 @@ function createApp(pool) {
         }
     });
 
+    app.get('/api/projects', async (_req, res) => {
+        try {
+            const [rows] = await pool.query(
+                `SELECT id, name, description, start_date, end_date, status, created_at, updated_at
+                 FROM pms_projects ORDER BY id`
+            );
+            res.json(rows.map(normalizeProject));
+        } catch (error) {
+            console.error('프로젝트 목록 조회 실패:', error.message);
+            res.status(503).json({ error: '데이터베이스에서 프로젝트 목록을 불러오지 못했습니다.' });
+        }
+    });
+
+    app.post('/api/projects', async (req, res) => {
+        const validated = validateProjectInput(req.body || {});
+        if (validated.error) {
+            res.status(400).json({ error: validated.error });
+            return;
+        }
+
+        const project = validated.value;
+        try {
+            const [result] = await writePool.query(
+                `INSERT INTO pms_projects (name, description, start_date, end_date, status)
+                 VALUES (?, ?, ?, ?, ?)`,
+                [project.name, project.description, project.startDate, project.endDate, project.status]
+            );
+            res.status(201).json({ id: Number(result.insertId), ...project });
+        } catch (error) {
+            console.error('프로젝트 등록 실패:', error.message);
+            res.status(503).json({ error: '프로젝트를 등록하지 못했습니다.' });
+        }
+    });
+
+    app.get('/api/projects/:projectId/phases', async (req, res) => {
+        const projectId = parseProjectId(req.params.projectId);
+        if (projectId === null) {
+            res.status(400).json({ error: '프로젝트 ID는 양의 정수여야 합니다.' });
+            return;
+        }
+
+        try {
+            const [rows] = await pool.query(
+                `SELECT id, project_id, code, name, sequence_no, start_date, end_date, status
+                 FROM pms_project_phases WHERE project_id = ? ORDER BY sequence_no, id`,
+                [projectId]
+            );
+            res.json(rows.map(normalizePhase));
+        } catch (error) {
+            console.error('프로젝트 단계 조회 실패:', error.message);
+            res.status(503).json({ error: '데이터베이스에서 프로젝트 단계를 불러오지 못했습니다.' });
+        }
+    });
+
+    app.post('/api/projects/:projectId/phases', async (req, res) => {
+        const projectId = parseProjectId(req.params.projectId);
+        if (projectId === null) {
+            res.status(400).json({ error: '프로젝트 ID는 양의 정수여야 합니다.' });
+            return;
+        }
+        const validated = validatePhaseInput(req.body || {});
+        if (validated.error) {
+            res.status(400).json({ error: validated.error });
+            return;
+        }
+
+        const phase = validated.value;
+        try {
+            const [result] = await writePool.query(
+                `INSERT INTO pms_project_phases
+                    (project_id, code, name, sequence_no, start_date, end_date, status)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                [projectId, phase.code, phase.name, phase.sequence, phase.startDate, phase.endDate, phase.status]
+            );
+            res.status(201).json({ id: Number(result.insertId), projectId, ...phase });
+        } catch (error) {
+            console.error('프로젝트 단계 등록 실패:', error.message);
+            const status = error.code === 'ER_DUP_ENTRY' ? 409 : 503;
+            res.status(status).json({ error: status === 409 ? '동일한 단계 코드 또는 순서가 이미 존재합니다.' : '프로젝트 단계를 등록하지 못했습니다.' });
+        }
+    });
+
     app.get('/api/health', async (_req, res) => {
         try {
             await pool.query('SELECT 1');
@@ -194,7 +389,8 @@ function createApp(pool) {
 }
 
 const pool = mysql.createPool(dbConfig);
-const app = createApp(pool);
+const writePool = process.env.DB_WRITE_USER ? mysql.createPool(writeDbConfig) : pool;
+const app = createApp(pool, writePool);
 
 if (require.main === module) {
     const server = app.listen(PORT, '127.0.0.1', () => {
@@ -206,6 +402,7 @@ if (require.main === module) {
         console.log(`\n${signal} 수신: 서버를 종료합니다.`);
         server.close(async () => {
             await pool.end();
+            if (writePool !== pool) await writePool.end();
             process.exit(0);
         });
     }
@@ -219,6 +416,10 @@ module.exports = {
     createApp,
     buildTaskHierarchy,
     parseProjectId,
+    normalizeProject,
+    normalizePhase,
+    validateProjectInput,
+    validatePhaseInput,
     normalizeDate,
     normalizeProgress,
     normalizeTask
